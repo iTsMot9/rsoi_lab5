@@ -20,13 +20,16 @@ jobs:
           KEYCLOAK_ADMIN_PASSWORD: admin
           KC_HEALTH_ENABLED: "true"
           KC_METRICS_ENABLED: "true"
+          KC_BOOTSTRAP_ADMIN_USERNAME: admin
+          KC_BOOTSTRAP_ADMIN_PASSWORD: admin
         options: >-
           --health-cmd="curl -f http://localhost:8080/health/ready || exit 1"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
           --entrypoint /opt/keycloak/bin/kc.sh
-          start-dev --import-realm
+          start-dev
+          --import-realm
     steps:
       - uses: actions/checkout@v4
         with:
@@ -165,7 +168,6 @@ jobs:
 
       - name: Configure Keycloak realm in cluster
         run: |
-          # Create temporary config file
           cat <<EOF > /tmp/keycloak-config.json
           {
             "realm": "rsoi-realm",
