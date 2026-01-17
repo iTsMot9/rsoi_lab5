@@ -184,7 +184,7 @@ jobs:
       - name: Deploy Keycloak with minimal resources
         run: |
           helm upgrade --install keycloak oci://registry-1.docker.io/bitnamicharts/keycloak \
-            --version 17.3.0 \
+            --version 20.0.4 \
             --namespace rsoi-lab4 \
             --set auth.adminUser=admin \
             --set auth.adminPassword=admin \
@@ -202,6 +202,8 @@ jobs:
             --set postgresql.primary.resources.requests.cpu=50m \
             --set postgresql.primary.resources.limits.memory=256Mi \
             --set postgresql.primary.resources.limits.cpu=150m \
+            --set image.repository=quay.io/keycloak/keycloak \
+            --set image.tag=23.0 \
             --set extraEnvVars[0].name=KC_CACHE \
             --set extraEnvVars[0].value=local \
             --set readinessProbe.initialDelaySeconds=60 \
