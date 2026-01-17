@@ -21,6 +21,7 @@ app:
 service:
   type: ClusterIP
   port: 80
+  targetPort: 8070
 
 ingress:
   enabled: true
@@ -34,14 +35,18 @@ ingress:
           pathType: Prefix
 
 env:
-  CAR_SERVICE_URL: "http://car-service:8070"
-  RENTAL_SERVICE_URL: "http://rental-service:8060"
-  PAYMENT_SERVICE_URL: "http://payment-service:8050"
+  PORT: "8070"
+  HOST: "0.0.0.0"
   DATABASE_URL: "postgresql://program:test@postgres.rsoi-lab4.svc.cluster.local:5432/cars"
   
+  KEYCLOAK_ISSUER: "http://keycloak.rsoi-lab4.svc.cluster.local:8080/realms/rsoi-realm"
+  KEYCLOAK_JWKS_URI: "http://keycloak.rsoi-lab4.svc.cluster.local:8080/realms/rsoi-realm/protocol/openid-connect/certs"
+  KEYCLOAK_CLIENT_ID: "lab5-client"
+
 livenessProbe:
-  path: /manage/health 
-  port: 8070
+  httpGet:
+    path: /manage/health 
+    port: 8070
   initialDelaySeconds: 30
   periodSeconds: 10
   failureThreshold: 3

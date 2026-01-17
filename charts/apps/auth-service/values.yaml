@@ -1,15 +1,15 @@
-nameOverride: rental-service
-fullnameOverride: rental-service
+nameOverride: auth-service
+fullnameOverride: auth-service
 
-replicaCount: 2
+replicaCount: 1
 
 image:
-  repository: itsmot9/rental-service
+  repository: itsmot9/auth-service
   tag: latest
   pullPolicy: Always
 
 app:
-  port: 8060
+  port: 8081
   resources:
     requests:
       memory: 128Mi
@@ -20,41 +20,29 @@ app:
 
 service:
   type: ClusterIP
-  port: 80
-  targetPort: 8060
-
-ingress:
-  enabled: true
-  annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
-  ingressClassName: "nginx"
-  hosts:
-    - host: rental.158.160.206.47.nip.io
-      paths:
-        - path: /
-          pathType: Prefix
+  port: 8081
+  targetPort: 8081
 
 env:
-  PORT: "8060"
+  PORT: "8081"
   HOST: "0.0.0.0"
-  DATABASE_URL: "postgresql://program:test@postgres.rsoi-lab4.svc.cluster.local:5432/rentals"
-  
   KEYCLOAK_ISSUER: "http://keycloak.rsoi-lab4.svc.cluster.local:8080/realms/rsoi-realm"
   KEYCLOAK_JWKS_URI: "http://keycloak.rsoi-lab4.svc.cluster.local:8080/realms/rsoi-realm/protocol/openid-connect/certs"
   KEYCLOAK_CLIENT_ID: "lab5-client"
+  KEYCLOAK_TOKEN_URL: "http://keycloak.rsoi-lab4.svc.cluster.local:8080/realms/rsoi-realm/protocol/openid-connect/token"
 
 livenessProbe:
   httpGet:
-    path: /manage/health 
-    port: 8060
+    path: /health
+    port: 8081
   initialDelaySeconds: 30
   periodSeconds: 10
   failureThreshold: 3
 
 readinessProbe:
   httpGet:
-    path: /manage/health
-    port: 8060
+    path: /health
+    port: 8081
   initialDelaySeconds: 20
   periodSeconds: 5
   failureThreshold: 3

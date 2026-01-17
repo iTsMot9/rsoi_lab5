@@ -21,6 +21,7 @@ app:
 service:
   type: ClusterIP
   port: 80
+  targetPort: 8080
 
 ingress:
   enabled: true
@@ -34,13 +35,19 @@ ingress:
           pathType: Prefix
 
 env:
-  CAR_SERVICE_URL: "http://car-service:80"
-  RENTAL_SERVICE_URL: "http://rental-service:80"
-  PAYMENT_SERVICE_URL: "http://payment-service:80"
+  CAR_SERVICE_URL: "http://car-service.rsoi-lab4.svc.cluster.local:80"
+  RENTAL_SERVICE_URL: "http://rental-service.rsoi-lab4.svc.cluster.local:80"
+  PAYMENT_SERVICE_URL: "http://payment-service.rsoi-lab4.svc.cluster.local:80"
+  AUTH_SERVICE_URL: "http://auth-service.rsoi-lab4.svc.cluster.local:8081"
   
+  KEYCLOAK_ISSUER: "http://keycloak.rsoi-lab4.svc.cluster.local:8080/realms/rsoi-realm"
+  KEYCLOAK_JWKS_URI: "http://keycloak.rsoi-lab4.svc.cluster.local:8080/realms/rsoi-realm/protocol/openid-connect/certs"
+  KEYCLOAK_CLIENT_ID: "lab5-client"
+
 livenessProbe:
-  path: /manage/health 
-  port: 8080
+  httpGet:
+    path: /manage/health 
+    port: 8080
   initialDelaySeconds: 30
   periodSeconds: 10
   failureThreshold: 3

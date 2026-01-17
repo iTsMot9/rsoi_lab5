@@ -88,20 +88,25 @@ jobs:
         run: |
           cd src/auth-service
           pip install -r requirements.txt
+          python -m pytest test_main.py -v || echo "Unit tests for auth-service failed or skipped"
+          cd ../..
           
-          cd ../car-service
+          cd src/car-service
           pip install -r requirements.txt
           python -m pytest test_main.py -v || echo "Unit tests for car-service failed or skipped"
+          cd ../..
           
-          cd ../gateway
+          cd src/gateway
           pip install -r requirements.txt
           python -m pytest test_main.py -v || echo "Unit tests for gateway failed or skipped"
+          cd ../..
           
-          cd ../payment-service
+          cd src/payment-service
           pip install -r requirements.txt
           python -m pytest test_main.py -v || echo "Unit tests for payment-service failed or skipped"
+          cd ../..
           
-          cd ../rental-service
+          cd src/rental-service
           pip install -r requirements.txt
           python -m pytest test_main.py -v || echo "Unit tests for rental-service failed or skipped"
         continue-on-error: true
@@ -121,6 +126,9 @@ jobs:
         timeout-minutes: 10
         run: |
           DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }}
+          docker build -t $DOCKER_USERNAME/auth-service:${{ github.sha }} ./src/auth-service
+          docker push $DOCKER_USERNAME/auth-service:${{ github.sha }}
+          
           docker build -t $DOCKER_USERNAME/car-service:${{ github.sha }} ./src/car-service
           docker push $DOCKER_USERNAME/car-service:${{ github.sha }}
 
@@ -145,8 +153,8 @@ jobs:
               echo "Секрет YC_SERVICE_ACCOUNT_KEY содержит невалидный JSON"
               exit 1
           fi
-          yc config profile create rsoi-lab5
-          yc config profiles activate rsoi-lab5
+          yc config profile create rsoi-lab4
+          yc config profiles activate rsoi-lab4
           yc config set service-account-key /tmp/yc-sa-key.json
           yc config set cloud-id "${{ secrets.YC_CLOUD_ID }}"
           yc config set folder-id "${{ secrets.YC_FOLDER_ID }}"
@@ -167,10 +175,10 @@ jobs:
 
       - name: Deploy Keycloak to Kubernetes Cluster
         run: |
-          kubectl create namespace rsoi-lab5 --ignore-not-found=true
+          kubectl create namespace rsoi-lab4 --ignore-not-found=true
           helm upgrade --install keycloak oci://registry-1.docker.io/bitnamicharts/keycloak \
             --version 17.3.0 \
-            --namespace rsoi-lab5 \
+            --namespace rsoi-lab4 \
             --set auth.adminUser=admin \
             --set auth.adminPassword=admin \
             --set service.type=ClusterIP \
@@ -179,7 +187,7 @@ jobs:
             --wait
 
       - name: Wait for Keycloak Pod in Cluster
-        run: kubectl wait -n rsoi-lab5 statefulset.apps/keycloak --for=condition=Ready --timeout=5m
+        run: kubectl wait -n rsoi-lab4 statefulset.apps/keycloak --for=condition=Ready --timeout=5m
 
       - name: Configure Keycloak Realm in Cluster
         run: |
@@ -212,14 +220,14 @@ jobs:
           }
           EOF
           
-          KEYCLOAK_POD_NAME=$(kubectl get pods -n rsoi-lab5 -l app.kubernetes.io/name=keycloak -o jsonpath='{.items[0].metadata.name}')
+          KEYCLOAK_POD_NAME=$(kubectl get pods -n rsoi-lab4 -l app.kubernetes.io/name=keycloak -o jsonpath='{.items[0].metadata.name}')
           echo "Targeting Keycloak pod: $KEYCLOAK_POD_NAME"
           
-          kubectl cp /tmp/keycloak-cluster-config.json -n rsoi-lab5 $KEYCLOAK_POD_NAME:/tmp/
+          kubectl cp /tmp/keycloak-cluster-config.json -n rsoi-lab4 $KEYCLOAK_POD_NAME:/tmp/
           
           sleep 5
           
-          kubectl exec -n rsoi-lab5 $KEYCLOAK_POD_NAME -- sh -c '
+          kubectl exec -n rsoi-lab4 $KEYCLOAK_POD_NAME -- sh -c '
             ADMIN_TOKEN=$(curl -X POST http://localhost:8080/realms/master/protocol/openid-connect/token \
               -H "Content-Type: application/x-www-form-urlencoded" \
               -d "client_id=admin-cli&username=admin&password=admin&grant_type=password" | jq -r ".access_token")
@@ -232,46 +240,47 @@ jobs:
 
       - name: Clean up old resources from default namespace
         run: |
-          kubectl delete deployment,service,ingress gateway car-service payment-service rental-service -n default --ignore-not-found=true
+          kubectl delete deployment,service,ingress gateway car-service payment-service rental-service auth-service -n default --ignore-not-found=true
 
-      - name: Clean up rsoi-lab5 namespace before deploy
+      - name: Clean up rsoi-lab4 namespace before deploy
         run: |
-          kubectl delete deployment,service,ingress gateway car-service payment-service rental-service -n rsoi-lab5 --ignore-not-found=true
-          kubectl delete configmap postgres-init-scripts -n rsoi-lab5 --ignore-not-found --timeout=60s
+          kubectl delete deployment,service,ingress gateway car-service payment-service rental-service auth-service -n rsoi-lab4 --ignore-not-found=true
+          kubectl delete configmap postgres-init-scripts -n rsoi-lab4 --ignore-not-found --timeout=60s
         continue-on-error: true
 
       - name: Deploy PostgreSQL to Cluster
         run: |
-          kubectl apply -f ./postgres/postgres-pvc.yaml -n rsoi-lab5
-          kubectl apply -f ./postgres/postgres-configmap.yaml -n rsoi-lab5
-          kubectl apply -f ./postgres/postgres-deployment.yaml -n rsoi-lab5
-          kubectl apply -f ./postgres/postgres-service.yaml -n rsoi-lab5
+          kubectl apply -f ./postgres/postgres-pvc.yaml -n rsoi-lab4
+          kubectl apply -f ./postgres/postgres-configmap.yaml -n rsoi-lab4
+          kubectl apply -f ./postgres/postgres-deployment.yaml -n rsoi-lab4
+          kubectl apply -f ./postgres/postgres-service.yaml -n rsoi-lab4
 
       - name: Wait for PostgreSQL in Cluster
-        run: kubectl wait -n rsoi-lab5 deployment/postgres --for=condition=Available --timeout=5m
+        run: kubectl wait -n rsoi-lab4 deployment/postgres --for=condition=Available --timeout=5m
 
       - name: Update Helm Values for Services (Set Image Tags)
         run: |
-          for service in car-service gateway payment-service rental-service; do
+          for service in auth-service car-service gateway payment-service rental-service; do
              sed -i "s|tag: latest|tag: ${{ github.sha }}|g" "./charts/apps/$service/values.yaml"
           done
 
       - name: Deploy Microservices via Helm to Cluster
         run: |
-          for service in car-service gateway payment-service rental-service; do
-            sed -i "s|KEYCLOAK_ISSUER.*|KEYCLOAK_ISSUER: \"http://keycloak.rsoi-lab5.svc.cluster.local:8080/realms/rsoi-realm\"|" "./charts/apps/$service/values.yaml"
-            sed -i "s|KEYCLOAK_JWKS_URI.*|KEYCLOAK_JWKS_URI: \"http://keycloak.rsoi-lab5.svc.cluster.local:8080/realms/rsoi-realm/protocol/openid-connect/certs\"|" "./charts/apps/$service/values.yaml"
+          for service in auth-service car-service gateway payment-service rental-service; do
+            sed -i "s|KEYCLOAK_ISSUER.*|KEYCLOAK_ISSUER: \"http://keycloak.rsoi-lab4.svc.cluster.local:8080/realms/rsoi-realm\"|" "./charts/apps/$service/values.yaml"
+            sed -i "s|KEYCLOAK_JWKS_URI.*|KEYCLOAK_JWKS_URI: \"http://keycloak.rsoi-lab4.svc.cluster.local:8080/realms/rsoi-realm/protocol/openid-connect/certs\"|" "./charts/apps/$service/values.yaml"
             sed -i "s|KEYCLOAK_CLIENT_ID.*|KEYCLOAK_CLIENT_ID: \"lab5-client\"|" "./charts/apps/$service/values.yaml"
           done
 
-          helm upgrade --install car-service ./charts/common -f ./charts/apps/car-service/values.yaml -n rsoi-lab5 --create-namespace
-          helm upgrade --install gateway ./charts/common -f ./charts/apps/gateway/values.yaml -n rsoi-lab5 --create-namespace
-          helm upgrade --install payment-service ./charts/common -f ./charts/apps/payment-service/values.yaml -n rsoi-lab5 --create-namespace
-          helm upgrade --install rental-service ./charts/common -f ./charts/apps/rental-service/values.yaml -n rsoi-lab5 --create-namespace
+          helm upgrade --install auth-service ./charts/common -f ./charts/apps/auth-service/values.yaml -n rsoi-lab4 --create-namespace
+          helm upgrade --install car-service ./charts/common -f ./charts/apps/car-service/values.yaml -n rsoi-lab4 --create-namespace
+          helm upgrade --install gateway ./charts/common -f ./charts/apps/gateway/values.yaml -n rsoi-lab4 --create-namespace
+          helm upgrade --install payment-service ./charts/common -f ./charts/apps/payment-service/values.yaml -n rsoi-lab4 --create-namespace
+          helm upgrade --install rental-service ./charts/common -f ./charts/apps/rental-service/values.yaml -n rsoi-lab4 --create-namespace
 
       - name: Wait for Microservices in Cluster to be Ready
         run: |
-          kubectl wait -n rsoi-lab5 deployment/gateway deployment/car-service deployment/payment-service deployment/rental-service --for=condition=Available --timeout=5m
+          kubectl wait -n rsoi-lab4 deployment/auth-service deployment/gateway deployment/car-service deployment/payment-service deployment/rental-service --for=condition=Available --timeout=5m
 
       - name: Make test script executable
         run: chmod +x ./scripts/test-script.sh
