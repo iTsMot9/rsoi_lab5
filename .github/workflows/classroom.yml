@@ -25,10 +25,17 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
+        entrypoint: /opt/keycloak/bin/kc.sh
+        cmd: start-dev --import-realm
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Set up Python for testing
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
 
       - name: Configure Keycloak realm
         run: |
@@ -45,15 +52,23 @@ jobs:
                 "standardFlowEnabled": false,
                 "directAccessGrantsEnabled": true,
                 "redirectUris": ["*"],
-                "webOrigins": ["*"]
+                "webOrigins": ["*"],
+                "attributes": {
+                  "pkce.code.challenge.method": "S256"
+                }
+              }],
+              "users": [{
+                "username": "testuser",
+                "email": "test@example.com",
+                "enabled": true,
+                "credentials": [{
+                  "type": "password",
+                  "value": "testpass",
+                  "temporary": false
+                }]
               }]
             }'
         continue-on-error: true
-
-      - name: Set up Python for testing
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
 
       - name: Install dependencies and run unit tests
         env:
@@ -63,7 +78,20 @@ jobs:
         run: |
           cd src/auth-service
           pip install -r requirements.txt
+          
+          cd ../car-service
+          pip install -r requirements.txt
+          python -m pytest test_main.py -v
+          
           cd ../gateway
+          pip install -r requirements.txt
+          python -m pytest test_main.py -v
+          
+          cd ../payment-service
+          pip install -r requirements.txt
+          python -m pytest test_main.py -v
+          
+          cd ../rental-service
           pip install -r requirements.txt
           python -m pytest test_main.py -v
         continue-on-error: true
@@ -137,12 +165,63 @@ jobs:
 
       - name: Configure Keycloak realm in cluster
         run: |
-          KEYCLOAK_POD=$(kubectl get pods -n rsoi-lab5 -l app.kubernetes.io/instance=keycloak -o jsonpath='{.items[0].metadata.name}')
-          kubectl cp ./keycloak-config.json $KEYCLOAK_POD:/tmp/keycloak-config.json -n rsoi-lab5
+          # Create temporary config file
+          cat <<EOF > /tmp/keycloak-config.json
+          {
+            "realm": "rsoi-realm",
+            "enabled": true,
+            "clients": [{
+              "clientId": "lab5-client",
+              "publicClient": true,
+              "standardFlowEnabled": false,
+              "directAccessGrantsEnabled": true,
+              "redirectUris": ["*"],
+              "webOrigins": ["*"],
+              "attributes": {
+                "pkce.code.challenge.method": "S256"
+              }
+            }],
+            "users": [{
+              "username": "testuser",
+              "email": "test@example.com",
+              "enabled": true,
+              "credentials": [{
+                "type": "password",
+                "value": "testpass",
+                "temporary": false
+              }]
+            }]
+          }
+          EOF
+          
+          kubectl wait -n rsoi-lab5 deployment/keycloak --for=condition=Available --timeout=5m
+          
+          KEYCLOAK_POD=$(kubectl get pods -n rsoi-lab5 -l app.kubernetes.io/name=keycloak -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || kubectl get pods -n rsoi-lab5 -l app.kubernetes.io/instance=keycloak -o jsonpath='{.items[0].metadata.name}')
+          kubectl cp /tmp/keycloak-config.json $KEYCLOAK_POD:/tmp/keycloak-config.json -n rsoi-lab5
           kubectl exec $KEYCLOAK_POD -n rsoi-lab5 -- curl -X POST http://localhost:8080/admin/realms \
             -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $(curl -X POST http://localhost:8080/realms/master/protocol/openid-connect/token -d 'client_id=admin-cli&username=admin&password=admin&grant_type=password' | jq -r '.access_token')" \
+            -H "Authorization: Bearer $(kubectl exec $KEYCLOAK_POD -n rsoi-lab5 -- curl -X POST http://localhost:8080/realms/master/protocol/openid-connect/token -d 'client_id=admin-cli&username=admin&password=admin&grant_type=password' | jq -r '.access_token')" \
             -d @/tmp/keycloak-config.json
+
+      - name: Clean up old resources from default
+        run: |
+          kubectl delete deployment,service,ingress gateway car-service payment-service rental-service -n default --ignore-not-found=true
+
+      - name: Clean up rsoi-lab5 namespace
+        run: |
+          kubectl delete deployment,service,ingress gateway car-service payment-service rental-service -n rsoi-lab5 --ignore-not-found=true
+          kubectl delete configmap postgres-init-scripts -n rsoi-lab5 --ignore-not-found
+        continue-on-error: true
+
+      - name: Deploy PostgreSQL
+        run: |
+          kubectl apply -f ./postgres/postgres-pvc.yaml -n rsoi-lab5
+          kubectl apply -f ./postgres/postgres-configmap.yaml -n rsoi-lab5
+          kubectl apply -f ./postgres/postgres-deployment.yaml -n rsoi-lab5
+          kubectl apply -f ./postgres/postgres-service.yaml -n rsoi-lab5
+
+      - name: Wait for PostgreSQL
+        run: kubectl wait -n rsoi-lab5 deployment/postgres --for=condition=Available --timeout=5m
 
       - name: Deploy Microservices via Helm
         run: |
