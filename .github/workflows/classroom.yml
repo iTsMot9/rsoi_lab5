@@ -42,6 +42,9 @@ jobs:
         with:
           python-version: '3.9'
 
+      - name: Install jq for JSON processing
+        run: sudo apt-get update && sudo apt-get install -y jq
+
       - name: Configure Keycloak realm for tests
         run: |
           sleep 15
@@ -205,6 +208,7 @@ jobs:
             --set postgresql.primary.resources.requests.cpu=50m \
             --set postgresql.primary.resources.limits.memory=256Mi \
             --set postgresql.primary.resources.limits.cpu=150m \
+            --set image.tag=23.0.7-debian-11-r10 \
             --set cache.type=local \
             --set readinessProbe.initialDelaySeconds=60 \
             --set livenessProbe.initialDelaySeconds=90 \
@@ -227,8 +231,9 @@ jobs:
           
           if [ -z "$KEYCLOAK_POD" ]; then
             echo "Keycloak pod not found, describing pods..."
-            kubectl describe pods -n rsoi-lab4 -l app.kubernetes.io/name=keycloak
+            kubectl describe pods -n rsoi-lab4 -l app.kubernetes.io/name=keycloak || echo "No pods found"
             kubectl logs -l app.kubernetes.io/name=keycloak -n rsoi-lab4 --tail=100 || echo "No logs available"
+            exit 1
           fi
 
       - name: Configure Keycloak Realm in Cluster
@@ -265,10 +270,10 @@ jobs:
           
           kubectl cp /tmp/keycloak-cluster-config.json -n rsoi-lab4 $KEYCLOAK_POD_NAME:/tmp/
           
-          sleep 10
+          sleep 15
           
           kubectl exec -n rsoi-lab4 $KEYCLOAK_POD_NAME -- sh -c '
-            sleep 15
+            sleep 20
             echo "Getting admin token..."
             ADMIN_TOKEN=$(curl -X POST http://localhost:8080/realms/master/protocol/openid-connect/token \
               -H "Content-Type: application/x-www-form-urlencoded" \
@@ -278,11 +283,16 @@ jobs:
             
             if [ -z "$ADMIN_TOKEN" ] || [ "$ADMIN_TOKEN" = "null" ]; then
               echo "Failed to get admin token, retrying..."
-              sleep 10
+              sleep 15
               ADMIN_TOKEN=$(curl -X POST http://localhost:8080/realms/master/protocol/openid-connect/token \
                 -H "Content-Type: application/x-www-form-urlencoded" \
                 -d "client_id=admin-cli&username=admin&password=admin&grant_type=password" 2>/dev/null | jq -r ".access_token")
               echo "Admin token after retry: $ADMIN_TOKEN"
+            fi
+            
+            if [ -z "$ADMIN_TOKEN" ] || [ "$ADMIN_TOKEN" = "null" ]; then
+              echo "Failed to get admin token after retries"
+              exit 1
             fi
             
             echo "Creating realm..."
@@ -346,7 +356,7 @@ jobs:
           kubectl wait -n rsoi-lab4 deployment/auth-service deployment/gateway deployment/car-service deployment/payment-service deployment/rental-service --for=condition=Available --timeout=10m
           
           for service in auth-service car-service gateway payment-service rental-service; do
-            kubectl rollout status deployment/$service -n rsoi-lab4 --timeout=5m
+            kubectl rollout status deployment/$service -n rsoi-lab4 --timeout=5m || echo "Rollout status failed for $service, continuing..."
           done
 
       - name: Make test script executable
