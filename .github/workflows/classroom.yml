@@ -195,6 +195,7 @@ jobs:
             --set resources.requests.cpu=50m \
             --set resources.limits.memory=256Mi \
             --set resources.limits.cpu=200m \
+            --set database.type=dev \
             --set extraEnvVars[0].name=KC_DB \
             --set extraEnvVars[0].value=dev-file \
             --set extraEnvVars[1].name=KC_CACHE \
