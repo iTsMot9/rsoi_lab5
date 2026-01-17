@@ -205,10 +205,7 @@ jobs:
             --set postgresql.primary.resources.requests.cpu=50m \
             --set postgresql.primary.resources.limits.memory=256Mi \
             --set postgresql.primary.resources.limits.cpu=150m \
-            --set image.repository=quay.io/keycloak/keycloak \
-            --set image.tag=23.0 \
-            --set extraEnvVars[0].name=KC_CACHE \
-            --set extraEnvVars[0].value=local \
+            --set cache.type=local \
             --set readinessProbe.initialDelaySeconds=60 \
             --set livenessProbe.initialDelaySeconds=90 \
             --set startupProbe.initialDelaySeconds=30 \
