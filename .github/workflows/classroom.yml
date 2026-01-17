@@ -178,7 +178,6 @@ jobs:
           kubectl delete namespace rsoi-lab4 --ignore-not-found --grace-period=0 --force || echo "Namespace deletion failed, continuing"
           kubectl create namespace rsoi-lab4
           
-          # Дополнительная очистка на случай, если что-то осталось
           kubectl delete deployment,statefulset,service,ingress,pvc,configmap,secret --all -n rsoi-lab4 --ignore-not-found
           sleep 10
 
@@ -282,7 +281,6 @@ jobs:
 
       - name: Deploy PostgreSQL with minimal resources
         run: |
-          # Обновляем ресурсы PostgreSQL для тестового окружения
           sed -i "s|resources:.*|resources:|" ./postgres/postgres-deployment.yaml
           sed -i "/resources:/a\  requests:\n    memory: 128Mi\n    cpu: 100m" ./postgres/postgres-deployment.yaml
           sed -i "/requests:/a\  limits:\n    memory: 256Mi\n    cpu: 300m" ./postgres/postgres-deployment.yaml
@@ -297,14 +295,12 @@ jobs:
 
       - name: Update Helm Values - Minimal Resources for Testing
         run: |
-          # Минимальные ресурсы для всех сервисов в тестовом окружении
           MIN_CPU_REQUEST="50m"
           MIN_CPU_LIMIT="150m"
           MIN_MEM_REQUEST="64Mi"
           MIN_MEM_LIMIT="128Mi"
           
           for service in auth-service car-service gateway payment-service rental-service; do
-            # Обновляем ресурсы
             if grep -q "resources:" "./charts/apps/$service/values.yaml"; then
               sed -i "/resources:/,/^$/d" "./charts/apps/$service/values.yaml"
             fi
@@ -319,10 +315,8 @@ resources:
     cpu: ${MIN_CPU_LIMIT}
 EOF
             
-            # Обновляем образы
             sed -i "s|tag: latest|tag: ${{ github.sha }}|g" "./charts/apps/$service/values.yaml"
             
-            # Обновляем настройки Keycloak
             sed -i "s|KEYCLOAK_ISSUER.*|KEYCLOAK_ISSUER: \"http://keycloak.rsoi-lab4.svc.cluster.local:8080/realms/rsoi-realm\"|" "./charts/apps/$service/values.yaml"
             sed -i "s|KEYCLOAK_JWKS_URI.*|KEYCLOAK_JWKS_URI: \"http://keycloak.rsoi-lab4.svc.cluster.local:8080/realms/rsoi-realm/protocol/openid-connect/certs\"|" "./charts/apps/$service/values.yaml"
             sed -i "s|KEYCLOAK_CLIENT_ID.*|KEYCLOAK_CLIENT_ID: \"lab5-client\"|" "./charts/apps/$service/values.yaml"
@@ -338,7 +332,6 @@ EOF
         run: |
           kubectl wait -n rsoi-lab4 deployment/auth-service deployment/gateway deployment/car-service deployment/payment-service deployment/rental-service --for=condition=Available --timeout=10m
           
-          # Дополнительная проверка
           for service in auth-service car-service gateway payment-service rental-service; do
             kubectl rollout status deployment/$service -n rsoi-lab4 --timeout=5m
           done
