@@ -191,17 +191,19 @@ jobs:
             --set service.type=ClusterIP \
             --set proxyHeaders=forwarded \
             --set metrics.enabled=false \
-            --set resources.requests.memory=128Mi \
-            --set resources.requests.cpu=50m \
-            --set resources.limits.memory=256Mi \
-            --set resources.limits.cpu=200m \
-            --set database.type=dev \
-            --set extraEnvVars[0].name=KC_DB \
-            --set extraEnvVars[0].value=dev-file \
-            --set extraEnvVars[1].name=KC_CACHE \
-            --set extraEnvVars[1].value=local \
-            --set postgresql.enabled=false \
-            --set volumePermissions.enabled=false \
+            --set resources.requests.memory=256Mi \
+            --set resources.requests.cpu=100m \
+            --set resources.limits.memory=512Mi \
+            --set resources.limits.cpu=300m \
+            --set postgresql.enabled=true \
+            --set postgresql.primary.persistence.enabled=false \
+            --set postgresql.volumePermissions.enabled=false \
+            --set postgresql.primary.resources.requests.memory=128Mi \
+            --set postgresql.primary.resources.requests.cpu=50m \
+            --set postgresql.primary.resources.limits.memory=256Mi \
+            --set postgresql.primary.resources.limits.cpu=150m \
+            --set extraEnvVars[0].name=KC_CACHE \
+            --set extraEnvVars[0].value=local \
             --set readinessProbe.initialDelaySeconds=60 \
             --set livenessProbe.initialDelaySeconds=90 \
             --set startupProbe.initialDelaySeconds=30 \
@@ -210,16 +212,16 @@ jobs:
             --timeout 15m0s \
             --wait
 
-      - name: Wait for Keycloak Pod
+      - name: Wait for Keycloak and PostgreSQL Pods
         run: |
           kubectl wait -n rsoi-lab4 pod --for=condition=Ready --selector=app.kubernetes.io/name=keycloak --timeout=15m
+          kubectl wait -n rsoi-lab4 pod --for=condition=Ready --selector=app.kubernetes.io/name=postgresql --timeout=10m
+          
           KEYCLOAK_POD=$(kubectl get pods -n rsoi-lab4 -l app.kubernetes.io/name=keycloak -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-          if [ -z "$KEYCLOAK_POD" ]; then
-            echo "Keycloak pod not found, checking logs..."
-            kubectl logs -l app.kubernetes.io/name=keycloak -n rsoi-lab4 --tail=50 || echo "No logs available"
-            exit 1
-          fi
-          echo "Keycloak pod ready: $KEYCLOAK_POD"
+          POSTGRES_POD=$(kubectl get pods -n rsoi-lab4 -l app.kubernetes.io/name=postgresql -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+          
+          echo "Keycloak pod: $KEYCLOAK_POD"
+          echo "PostgreSQL pod: $POSTGRES_POD"
 
       - name: Configure Keycloak Realm in Cluster
         run: |
@@ -255,13 +257,16 @@ jobs:
           
           kubectl cp /tmp/keycloak-cluster-config.json -n rsoi-lab4 $KEYCLOAK_POD_NAME:/tmp/
           
-          sleep 5
+          sleep 10
           
           kubectl exec -n rsoi-lab4 $KEYCLOAK_POD_NAME -- sh -c '
-            sleep 10
+            sleep 15
+            echo "Getting admin token..."
             ADMIN_TOKEN=$(curl -X POST http://localhost:8080/realms/master/protocol/openid-connect/token \
               -H "Content-Type: application/x-www-form-urlencoded" \
               -d "client_id=admin-cli&username=admin&password=admin&grant_type=password" 2>/dev/null | jq -r ".access_token")
+            
+            echo "Admin token: $ADMIN_TOKEN"
             
             if [ -z "$ADMIN_TOKEN" ] || [ "$ADMIN_TOKEN" = "null" ]; then
               echo "Failed to get admin token, retrying..."
@@ -269,12 +274,15 @@ jobs:
               ADMIN_TOKEN=$(curl -X POST http://localhost:8080/realms/master/protocol/openid-connect/token \
                 -H "Content-Type: application/x-www-form-urlencoded" \
                 -d "client_id=admin-cli&username=admin&password=admin&grant_type=password" 2>/dev/null | jq -r ".access_token")
+              echo "Admin token after retry: $ADMIN_TOKEN"
             fi
             
-            curl -X POST http://localhost:8080/admin/realms \
+            echo "Creating realm..."
+            RESPONSE=$(curl -X POST http://localhost:8080/admin/realms \
               -H "Content-Type: application/json" \
               -H "Authorization: Bearer $ADMIN_TOKEN" \
-              -d @/tmp/keycloak-cluster-config.json
+              -d @/tmp/keycloak-cluster-config.json 2>/dev/null)
+            echo "Realm creation response: $RESPONSE"
           '
         continue-on-error: true
 
