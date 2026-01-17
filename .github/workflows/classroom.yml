@@ -175,7 +175,7 @@ jobs:
 
       - name: Deploy Keycloak to Kubernetes Cluster
         run: |
-          kubectl create namespace rsoi-lab4 --ignore-not-found=true
+          kubectl get namespace rsoi-lab4 || kubectl create namespace rsoi-lab4
           helm upgrade --install keycloak oci://registry-1.docker.io/bitnamicharts/keycloak \
             --version 17.3.0 \
             --namespace rsoi-lab4 \
