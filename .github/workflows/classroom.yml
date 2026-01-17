@@ -184,6 +184,13 @@ jobs:
             --set service.type=ClusterIP \
             --set proxyHeaders=forwarded \
             --set metrics.enabled=false \
+            --set resources.requests.memory=512Mi \
+            --set resources.requests.cpu=250m \
+            --set resources.limits.memory=1024Mi \
+            --set resources.limits.cpu=500m \
+            --set extraEnvVars[0].name=KC_CACHE \
+            --set extraEnvVars[0].value=local \
+            --timeout 10m0s \
             --wait
 
       - name: Wait for Keycloak Pod in Cluster
