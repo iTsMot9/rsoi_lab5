@@ -173,35 +173,53 @@ jobs:
         run: |
           curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
-      - name: Deploy Keycloak to Kubernetes Cluster
+      - name: Cleanup old resources completely
         run: |
-          kubectl get namespace rsoi-lab4 || kubectl create namespace rsoi-lab4
-              helm upgrade --install keycloak oci://registry-1.docker.io/bitnamicharts/keycloak \
-                --version 17.3.0 \
-                --namespace rsoi-lab4 \
-                --set auth.adminUser=admin \
-                --set auth.adminPassword=admin \
-                --set service.type=ClusterIP \
-                --set proxyHeaders=forwarded \
-                --set metrics.enabled=false \
-                --set resources.requests.memory=256Mi \
-                --set resources.requests.cpu=100m \
-                --set resources.limits.memory=512Mi \
-                --set resources.limits.cpu=300m \
-                --set extraEnvVars[0].name=KC_DB \
-                --set extraEnvVars[0].value=dev-file \
-                --set extraEnvVars[1].name=KC_CACHE \
-                --set extraEnvVars[1].value=local \
-                --set postgresql.enabled=false \
-                --set volumePermissions.enabled=false \
-                --set readinessProbe.initialDelaySeconds=30 \
-                --set livenessProbe.initialDelaySeconds=60 \
-                --timeout 10m0s \
-                --wait
+          kubectl delete namespace rsoi-lab4 --ignore-not-found --grace-period=0 --force || echo "Namespace deletion failed, continuing"
+          kubectl create namespace rsoi-lab4
+          
+          # Дополнительная очистка на случай, если что-то осталось
+          kubectl delete deployment,statefulset,service,ingress,pvc,configmap,secret --all -n rsoi-lab4 --ignore-not-found
+          sleep 10
 
+      - name: Deploy Keycloak with minimal resources
+        run: |
+          helm upgrade --install keycloak oci://registry-1.docker.io/bitnamicharts/keycloak \
+            --version 17.3.0 \
+            --namespace rsoi-lab4 \
+            --set auth.adminUser=admin \
+            --set auth.adminPassword=admin \
+            --set service.type=ClusterIP \
+            --set proxyHeaders=forwarded \
+            --set metrics.enabled=false \
+            --set resources.requests.memory=128Mi \
+            --set resources.requests.cpu=50m \
+            --set resources.limits.memory=256Mi \
+            --set resources.limits.cpu=200m \
+            --set extraEnvVars[0].name=KC_DB \
+            --set extraEnvVars[0].value=dev-file \
+            --set extraEnvVars[1].name=KC_CACHE \
+            --set extraEnvVars[1].value=local \
+            --set postgresql.enabled=false \
+            --set volumePermissions.enabled=false \
+            --set readinessProbe.initialDelaySeconds=60 \
+            --set livenessProbe.initialDelaySeconds=90 \
+            --set startupProbe.initialDelaySeconds=30 \
+            --set startupProbe.periodSeconds=10 \
+            --set startupProbe.failureThreshold=30 \
+            --timeout 15m0s \
+            --wait
 
-      - name: Wait for Keycloak Pod in Cluster
-        run: kubectl wait -n rsoi-lab4 statefulset.apps/keycloak --for=condition=Ready --timeout=5m
+      - name: Wait for Keycloak Pod
+        run: |
+          kubectl wait -n rsoi-lab4 pod --for=condition=Ready --selector=app.kubernetes.io/name=keycloak --timeout=15m
+          KEYCLOAK_POD=$(kubectl get pods -n rsoi-lab4 -l app.kubernetes.io/name=keycloak -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+          if [ -z "$KEYCLOAK_POD" ]; then
+            echo "Keycloak pod not found, checking logs..."
+            kubectl logs -l app.kubernetes.io/name=keycloak -n rsoi-lab4 --tail=50 || echo "No logs available"
+            exit 1
+          fi
+          echo "Keycloak pod ready: $KEYCLOAK_POD"
 
       - name: Configure Keycloak Realm in Cluster
         run: |
@@ -235,66 +253,95 @@ jobs:
           EOF
           
           KEYCLOAK_POD_NAME=$(kubectl get pods -n rsoi-lab4 -l app.kubernetes.io/name=keycloak -o jsonpath='{.items[0].metadata.name}')
-          echo "Targeting Keycloak pod: $KEYCLOAK_POD_NAME"
+          echo "Configuring Keycloak realm on pod: $KEYCLOAK_POD_NAME"
           
           kubectl cp /tmp/keycloak-cluster-config.json -n rsoi-lab4 $KEYCLOAK_POD_NAME:/tmp/
           
           sleep 5
           
           kubectl exec -n rsoi-lab4 $KEYCLOAK_POD_NAME -- sh -c '
+            sleep 10
             ADMIN_TOKEN=$(curl -X POST http://localhost:8080/realms/master/protocol/openid-connect/token \
               -H "Content-Type: application/x-www-form-urlencoded" \
-              -d "client_id=admin-cli&username=admin&password=admin&grant_type=password" | jq -r ".access_token")
+              -d "client_id=admin-cli&username=admin&password=admin&grant_type=password" 2>/dev/null | jq -r ".access_token")
+            
+            if [ -z "$ADMIN_TOKEN" ] || [ "$ADMIN_TOKEN" = "null" ]; then
+              echo "Failed to get admin token, retrying..."
+              sleep 10
+              ADMIN_TOKEN=$(curl -X POST http://localhost:8080/realms/master/protocol/openid-connect/token \
+                -H "Content-Type: application/x-www-form-urlencoded" \
+                -d "client_id=admin-cli&username=admin&password=admin&grant_type=password" 2>/dev/null | jq -r ".access_token")
+            fi
             
             curl -X POST http://localhost:8080/admin/realms \
               -H "Content-Type: application/json" \
               -H "Authorization: Bearer $ADMIN_TOKEN" \
               -d @/tmp/keycloak-cluster-config.json
           '
-
-      - name: Clean up old resources from default namespace
-        run: |
-          kubectl delete deployment,service,ingress gateway car-service payment-service rental-service auth-service -n default --ignore-not-found=true
-
-      - name: Clean up rsoi-lab4 namespace before deploy
-        run: |
-          kubectl delete deployment,service,ingress gateway car-service payment-service rental-service auth-service -n rsoi-lab4 --ignore-not-found=true
-          kubectl delete configmap postgres-init-scripts -n rsoi-lab4 --ignore-not-found --timeout=60s
         continue-on-error: true
 
-      - name: Deploy PostgreSQL to Cluster
+      - name: Deploy PostgreSQL with minimal resources
         run: |
+          # Обновляем ресурсы PostgreSQL для тестового окружения
+          sed -i "s|resources:.*|resources:|" ./postgres/postgres-deployment.yaml
+          sed -i "/resources:/a\  requests:\n    memory: 128Mi\n    cpu: 100m" ./postgres/postgres-deployment.yaml
+          sed -i "/requests:/a\  limits:\n    memory: 256Mi\n    cpu: 300m" ./postgres/postgres-deployment.yaml
+          
           kubectl apply -f ./postgres/postgres-pvc.yaml -n rsoi-lab4
           kubectl apply -f ./postgres/postgres-configmap.yaml -n rsoi-lab4
           kubectl apply -f ./postgres/postgres-deployment.yaml -n rsoi-lab4
           kubectl apply -f ./postgres/postgres-service.yaml -n rsoi-lab4
 
-      - name: Wait for PostgreSQL in Cluster
+      - name: Wait for PostgreSQL
         run: kubectl wait -n rsoi-lab4 deployment/postgres --for=condition=Available --timeout=5m
 
-      - name: Update Helm Values for Services (Set Image Tags)
+      - name: Update Helm Values - Minimal Resources for Testing
         run: |
+          # Минимальные ресурсы для всех сервисов в тестовом окружении
+          MIN_CPU_REQUEST="50m"
+          MIN_CPU_LIMIT="150m"
+          MIN_MEM_REQUEST="64Mi"
+          MIN_MEM_LIMIT="128Mi"
+          
           for service in auth-service car-service gateway payment-service rental-service; do
-             sed -i "s|tag: latest|tag: ${{ github.sha }}|g" "./charts/apps/$service/values.yaml"
-          done
-
-      - name: Deploy Microservices via Helm to Cluster
-        run: |
-          for service in auth-service car-service gateway payment-service rental-service; do
+            # Обновляем ресурсы
+            if grep -q "resources:" "./charts/apps/$service/values.yaml"; then
+              sed -i "/resources:/,/^$/d" "./charts/apps/$service/values.yaml"
+            fi
+            
+            cat <<EOF >> "./charts/apps/$service/values.yaml"
+resources:
+  requests:
+    memory: ${MIN_MEM_REQUEST}
+    cpu: ${MIN_CPU_REQUEST}
+  limits:
+    memory: ${MIN_MEM_LIMIT}
+    cpu: ${MIN_CPU_LIMIT}
+EOF
+            
+            # Обновляем образы
+            sed -i "s|tag: latest|tag: ${{ github.sha }}|g" "./charts/apps/$service/values.yaml"
+            
+            # Обновляем настройки Keycloak
             sed -i "s|KEYCLOAK_ISSUER.*|KEYCLOAK_ISSUER: \"http://keycloak.rsoi-lab4.svc.cluster.local:8080/realms/rsoi-realm\"|" "./charts/apps/$service/values.yaml"
             sed -i "s|KEYCLOAK_JWKS_URI.*|KEYCLOAK_JWKS_URI: \"http://keycloak.rsoi-lab4.svc.cluster.local:8080/realms/rsoi-realm/protocol/openid-connect/certs\"|" "./charts/apps/$service/values.yaml"
             sed -i "s|KEYCLOAK_CLIENT_ID.*|KEYCLOAK_CLIENT_ID: \"lab5-client\"|" "./charts/apps/$service/values.yaml"
           done
 
-          helm upgrade --install auth-service ./charts/common -f ./charts/apps/auth-service/values.yaml -n rsoi-lab4 --create-namespace
-          helm upgrade --install car-service ./charts/common -f ./charts/apps/car-service/values.yaml -n rsoi-lab4 --create-namespace
-          helm upgrade --install gateway ./charts/common -f ./charts/apps/gateway/values.yaml -n rsoi-lab4 --create-namespace
-          helm upgrade --install payment-service ./charts/common -f ./charts/apps/payment-service/values.yaml -n rsoi-lab4 --create-namespace
-          helm upgrade --install rental-service ./charts/common -f ./charts/apps/rental-service/values.yaml -n rsoi-lab4 --create-namespace
-
-      - name: Wait for Microservices in Cluster to be Ready
+      - name: Deploy Microservices via Helm with minimal resources
         run: |
-          kubectl wait -n rsoi-lab4 deployment/auth-service deployment/gateway deployment/car-service deployment/payment-service deployment/rental-service --for=condition=Available --timeout=5m
+          for service in auth-service car-service gateway payment-service rental-service; do
+            helm upgrade --install $service ./charts/common -f ./charts/apps/$service/values.yaml -n rsoi-lab4 --create-namespace
+          done
+
+      - name: Wait for Microservices to be Ready
+        run: |
+          kubectl wait -n rsoi-lab4 deployment/auth-service deployment/gateway deployment/car-service deployment/payment-service deployment/rental-service --for=condition=Available --timeout=10m
+          
+          # Дополнительная проверка
+          for service in auth-service car-service gateway payment-service rental-service; do
+            kubectl rollout status deployment/$service -n rsoi-lab4 --timeout=5m
+          done
 
       - name: Make test script executable
         run: chmod +x ./scripts/test-script.sh
