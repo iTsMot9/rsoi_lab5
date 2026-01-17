@@ -183,8 +183,11 @@ jobs:
 
       - name: Deploy Keycloak with minimal resources
         run: |
-          helm upgrade --install keycloak oci://registry-1.docker.io/bitnamicharts/keycloak \
-            --version 20.0.4 \
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm repo update
+          
+          helm upgrade --install keycloak bitnami/keycloak \
+            --version 19.0.0 \
             --namespace rsoi-lab4 \
             --set auth.adminUser=admin \
             --set auth.adminPassword=admin \
@@ -224,6 +227,12 @@ jobs:
           
           echo "Keycloak pod: $KEYCLOAK_POD"
           echo "PostgreSQL pod: $POSTGRES_POD"
+          
+          if [ -z "$KEYCLOAK_POD" ]; then
+            echo "Keycloak pod not found, describing pods..."
+            kubectl describe pods -n rsoi-lab4 -l app.kubernetes.io/name=keycloak
+            kubectl logs -l app.kubernetes.io/name=keycloak -n rsoi-lab4 --tail=100 || echo "No logs available"
+          fi
 
       - name: Configure Keycloak Realm in Cluster
         run: |
