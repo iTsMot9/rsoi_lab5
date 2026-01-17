@@ -176,22 +176,29 @@ jobs:
       - name: Deploy Keycloak to Kubernetes Cluster
         run: |
           kubectl get namespace rsoi-lab4 || kubectl create namespace rsoi-lab4
-          helm upgrade --install keycloak oci://registry-1.docker.io/bitnamicharts/keycloak \
-            --version 17.3.0 \
-            --namespace rsoi-lab4 \
-            --set auth.adminUser=admin \
-            --set auth.adminPassword=admin \
-            --set service.type=ClusterIP \
-            --set proxyHeaders=forwarded \
-            --set metrics.enabled=false \
-            --set resources.requests.memory=512Mi \
-            --set resources.requests.cpu=250m \
-            --set resources.limits.memory=1024Mi \
-            --set resources.limits.cpu=500m \
-            --set extraEnvVars[0].name=KC_CACHE \
-            --set extraEnvVars[0].value=local \
-            --timeout 10m0s \
-            --wait
+              helm upgrade --install keycloak oci://registry-1.docker.io/bitnamicharts/keycloak \
+                --version 17.3.0 \
+                --namespace rsoi-lab4 \
+                --set auth.adminUser=admin \
+                --set auth.adminPassword=admin \
+                --set service.type=ClusterIP \
+                --set proxyHeaders=forwarded \
+                --set metrics.enabled=false \
+                --set resources.requests.memory=256Mi \
+                --set resources.requests.cpu=100m \
+                --set resources.limits.memory=512Mi \
+                --set resources.limits.cpu=300m \
+                --set extraEnvVars[0].name=KC_DB \
+                --set extraEnvVars[0].value=dev-file \
+                --set extraEnvVars[1].name=KC_CACHE \
+                --set extraEnvVars[1].value=local \
+                --set postgresql.enabled=false \
+                --set volumePermissions.enabled=false \
+                --set readinessProbe.initialDelaySeconds=30 \
+                --set livenessProbe.initialDelaySeconds=60 \
+                --timeout 10m0s \
+                --wait
+
 
       - name: Wait for Keycloak Pod in Cluster
         run: kubectl wait -n rsoi-lab4 statefulset.apps/keycloak --for=condition=Ready --timeout=5m
