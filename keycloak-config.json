@@ -1,0 +1,15 @@
+{
+  "realm": "rsoi-realm",
+  "enabled": true,
+  "clients": [{
+    "clientId": "lab5-client",
+    "publicClient": true,
+    "standardFlowEnabled": false,
+    "directAccessGrantsEnabled": true,
+    "redirectUris": ["*"],
+    "webOrigins": ["*"],
+    "attributes": {
+      "pkce.code.challenge.method": "S256"
+    }
+  }]
+}

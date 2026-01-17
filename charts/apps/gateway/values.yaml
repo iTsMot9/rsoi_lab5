@@ -1,0 +1,55 @@
+nameOverride: gateway
+fullnameOverride: gateway
+
+replicaCount: 2 
+
+image:
+  repository: itsmot9/gateway
+  tag: latest
+  pullPolicy: Always
+
+app:
+  port: 8080
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 256Mi
+      cpu: 500m
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+  ingressClassName: "nginx"
+  hosts:
+    - host: gateway.158.160.206.47.nip.io
+      paths:
+        - path: /
+          pathType: Prefix
+
+env:
+  CAR_SERVICE_URL: "http://car-service:80"
+  RENTAL_SERVICE_URL: "http://rental-service:80"
+  PAYMENT_SERVICE_URL: "http://payment-service:80"
+  
+livenessProbe:
+  path: /manage/health 
+  port: 8080
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /manage/health
+    port: 8080
+  initialDelaySeconds: 20
+  periodSeconds: 5
+  failureThreshold: 3
+  timeoutSeconds: 3
