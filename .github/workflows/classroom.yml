@@ -20,16 +20,12 @@ jobs:
           KEYCLOAK_ADMIN_PASSWORD: admin
           KC_HEALTH_ENABLED: "true"
           KC_METRICS_ENABLED: "true"
-          KC_BOOTSTRAP_ADMIN_USERNAME: admin
-          KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+          KC_DB: "dev-file"
         options: >-
           --health-cmd="curl -f http://localhost:8080/health/ready || exit 1"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
-          --entrypoint /opt/keycloak/bin/kc.sh
-          start-dev
-          --import-realm
     steps:
       - uses: actions/checkout@v4
         with:
@@ -40,9 +36,19 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: Configure Keycloak realm
+      - name: Wait for Keycloak startup
         run: |
           sleep 30
+          # Проверим, что Keycloak запущен
+          until curl -f http://localhost:8080/health/ready; do
+            echo "Waiting for Keycloak to start..."
+            sleep 5
+          done
+          echo "Keycloak is ready!"
+
+      - name: Configure Keycloak realm
+        run: |
+          sleep 10
           curl -X POST http://localhost:8080/admin/realms \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $(curl -X POST http://localhost:8080/realms/master/protocol/openid-connect/token -d 'client_id=admin-cli&username=admin&password=admin&grant_type=password' | jq -r '.access_token')" \
@@ -168,6 +174,7 @@ jobs:
 
       - name: Configure Keycloak realm in cluster
         run: |
+          # Create temporary config file
           cat <<EOF > /tmp/keycloak-config.json
           {
             "realm": "rsoi-realm",
