@@ -222,8 +222,7 @@ jobs:
 
       - name: Configure Keycloak Realm in Cluster
         run: |
-          cat <<EOF > /tmp/keycloak-cluster-config.json
-          {
+          echo '{
             "realm": "rsoi-realm",
             "enabled": true,
             "clients": [{
@@ -248,8 +247,7 @@ jobs:
                 "temporary": false
               }]
             }]
-          }
-          EOF
+          }' > /tmp/keycloak-cluster-config.json
           
           KEYCLOAK_POD_NAME=$(kubectl get pods -n rsoi-lab4 -l app.kubernetes.io/name=keycloak -o jsonpath='{.items[0].metadata.name}')
           echo "Configuring Keycloak realm on pod: $KEYCLOAK_POD_NAME"
@@ -305,15 +303,13 @@ jobs:
               sed -i "/resources:/,/^$/d" "./charts/apps/$service/values.yaml"
             fi
             
-            cat <<EOF >> "./charts/apps/$service/values.yaml"
-resources:
-  requests:
-    memory: ${MIN_MEM_REQUEST}
-    cpu: ${MIN_CPU_REQUEST}
-  limits:
-    memory: ${MIN_MEM_LIMIT}
-    cpu: ${MIN_CPU_LIMIT}
-EOF
+            echo "resources:" >> "./charts/apps/$service/values.yaml"
+            echo "  requests:" >> "./charts/apps/$service/values.yaml"
+            echo "    memory: ${MIN_MEM_REQUEST}" >> "./charts/apps/$service/values.yaml"
+            echo "    cpu: ${MIN_CPU_REQUEST}" >> "./charts/apps/$service/values.yaml"
+            echo "  limits:" >> "./charts/apps/$service/values.yaml"
+            echo "    memory: ${MIN_MEM_LIMIT}" >> "./charts/apps/$service/values.yaml"
+            echo "    cpu: ${MIN_CPU_LIMIT}" >> "./charts/apps/$service/values.yaml"
             
             sed -i "s|tag: latest|tag: ${{ github.sha }}|g" "./charts/apps/$service/values.yaml"
             
