@@ -10,32 +10,23 @@ jobs:
   build:
     name: Autograding
     runs-on: ubuntu-latest
-    services:
-      keycloak:
-        image: quay.io/keycloak/keycloak:23.0
-        ports:
-          - 8080:8080
-        env:
-          KEYCLOAK_ADMIN: admin
-          KEYCLOAK_ADMIN_PASSWORD: admin
-          KC_HEALTH_ENABLED: "true"
-          KC_METRICS_ENABLED: "true"
-          KC_DB: "dev-file"
-          KC_FEATURES: "scripts"
-        options: >-
-          --health-cmd="curl -f http://localhost:8080/health/ready || exit 1"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=10
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set up Python for testing
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
+      - name: Start Keycloak for tests
+        run: |
+          docker run -d \
+            --name keycloak-test \
+            -p 8080:8080 \
+            -e KEYCLOAK_ADMIN=admin \
+            -e KEYCLOAK_ADMIN_PASSWORD=admin \
+            -e KC_HEALTH_ENABLED=true \
+            -e KC_METRICS_ENABLED=true \
+            -e KC_DB=dev-file \
+            quay.io/keycloak/keycloak:23.0 \
+            start-dev
 
       - name: Wait for Keycloak startup
         run: |
@@ -45,6 +36,11 @@ jobs:
             sleep 5
           done
           echo "Keycloak is ready!"
+
+      - name: Set up Python for testing
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
 
       - name: Configure Keycloak realm for tests
         run: |
@@ -109,6 +105,11 @@ jobs:
           pip install -r requirements.txt
           python -m pytest test_main.py -v || echo "Unit tests for rental-service failed or skipped"
         continue-on-error: true
+
+      - name: Stop Keycloak container
+        run: |
+          docker stop keycloak-test
+          docker rm keycloak-test
 
       - name: Login to Docker Hub
         uses: docker/login-action@v2
